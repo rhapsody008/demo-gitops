@@ -1,0 +1,26 @@
+# NOT applied by Flux. Create it by hand on EACH cluster, in the NKP project
+# namespace, before the app syncs. It is what makes the identical manifests
+# show a different cluster name and banner colour on each cluster.
+#
+# Primary cluster:
+#   kubectl -n <project-namespace> create configmap secure-intake-cluster \
+#     --from-literal=CLUSTER_NAME=workload-demo-primary \
+#     --from-literal=CLUSTER_DISPLAY_NAME="Workload Demo Primary Cluster" \
+#     --from-literal=CLUSTER_ROLE=primary
+#
+# Standby cluster:
+#   kubectl -n <project-namespace> create configmap secure-intake-cluster \
+#     --from-literal=CLUSTER_NAME=workload-demo-standby \
+#     --from-literal=CLUSTER_DISPLAY_NAME="Workload Demo Standby Cluster" \
+#     --from-literal=CLUSTER_ROLE=standby
+#
+# Pods read it at start-up. If you change it later:
+#   kubectl -n <project-namespace> rollout restart deployment/secure-intake
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: secure-intake-cluster
+data:
+  CLUSTER_NAME: workload-demo-primary
+  CLUSTER_DISPLAY_NAME: Workload Demo Primary Cluster
+  CLUSTER_ROLE: primary # primary = blue banner + seeds samples; standby = orange banner

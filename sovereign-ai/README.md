@@ -10,6 +10,7 @@ sovereign-ai/
 ├── overlays/
 │   ├── primary/          CLUSTER_NAME / DISPLAY_NAME / ROLE=primary  (blue banner)
 │   └── standby/          CLUSTER_NAME / DISPLAY_NAME / ROLE=standby  (orange banner)
+├── cluster-config.example.yaml   per-cluster identity ConfigMap (NKP project setup; not applied by Flux)
 ├── flux/
 │   ├── primary.yaml      Namespace + GitRepository + Kustomization → overlays/primary
 │   └── standby.yaml      Namespace + GitRepository + Kustomization → overlays/standby
@@ -26,40 +27,64 @@ Edit these values and commit them:
 | `base/kustomization.yaml` | `images.newTag`: pin it to a `sha-<short>` tag from GHCR before the event (it is `latest` now) |
 | `overlays/*/kustomization.yaml` | `CLUSTER_NAME` / `CLUSTER_DISPLAY_NAME`: the names shown in the banner |
 
-## 2. On each cluster
+## 2. Deploy
 
-Point `kubectl` at the **primary** cluster:
+### Option A — NKP project (recommended): one project, both clusters
 
-```sh
-kubectl create namespace sovereign-ai
-kubectl -n sovereign-ai create secret generic secure-intake-secrets \
-  --from-literal=S3_ACCESS_KEY=<objects access key> \
-  --from-literal=S3_SECRET_KEY=<objects secret key>
-kubectl apply -f sovereign-ai/flux/primary.yaml
-```
+1. Create an NKP project and place it on **both** clusters. Note the project namespace.
+2. On **each** cluster, create the Objects Secret and that cluster's identity ConfigMap in the project namespace.
+   The Secret is the same on both clusters. The ConfigMap is not:
 
-Then do the same on the **standby** cluster, with `flux/standby.yaml`.
+   ```sh
+   NS=<project-namespace>
+   kubectl -n $NS create secret generic secure-intake-secrets \
+     --from-literal=S3_ACCESS_KEY=<objects access key> \
+     --from-literal=S3_SECRET_KEY=<objects secret key>
+
+   # primary cluster
+   kubectl -n $NS create configmap secure-intake-cluster \
+     --from-literal=CLUSTER_NAME=workload-demo-primary \
+     --from-literal=CLUSTER_DISPLAY_NAME="Workload Demo Primary Cluster" \
+     --from-literal=CLUSTER_ROLE=primary
+
+   # standby cluster
+   kubectl -n $NS create configmap secure-intake-cluster \
+     --from-literal=CLUSTER_NAME=workload-demo-standby \
+     --from-literal=CLUSTER_DISPLAY_NAME="Workload Demo Standby Cluster" \
+     --from-literal=CLUSTER_ROLE=standby
+   ```
+
+3. In the project, go to **Continuous Deployment** and add this repo as a GitOps source with path **`sovereign-ai/base`**.
+
+NKP deploys the same manifests to both clusters. Each pod reads `secure-intake-cluster` from its own cluster
+(see [cluster-config.example.yaml](cluster-config.example.yaml)), so the banner shows the right name and colour.
+If you create or change the ConfigMap after the pods have started, run
+`kubectl -n $NS rollout restart deployment/secure-intake`.
+
+### Option B — per-cluster Flux files (no NKP project)
+
+On each cluster: create the `sovereign-ai` namespace and the Secret (as above, `NS=sovereign-ai`), then run
+`kubectl apply -f sovereign-ai/flux/primary.yaml` or `flux/standby.yaml`. These point at `overlays/primary` and
+`overlays/standby`, which already contain the cluster names, so no identity ConfigMap is needed. If you create one
+anyway, it overrides the overlay values.
+
+### Image pull
 
 The app's GHCR image is private by default. Make the package public, or create a pull secret on both clusters and
 uncomment `imagePullSecrets` in `base/deployment.yaml`:
 
 ```sh
-kubectl -n sovereign-ai create secret docker-registry ghcr-pull \
+kubectl -n $NS create secret docker-registry ghcr-pull \
   --docker-server=ghcr.io --docker-username=<github user> --docker-password=<PAT with read:packages>
 ```
 
-If this repo is private, follow the `secretRef` comment in `flux/*.yaml`.
-
-**Using NKP's Continuous Deployment UI instead of `kubectl apply -f flux/…`:** create one project per cluster,
-each placed on only one cluster. In each project, add this repo as a GitOps source with path
-`sovereign-ai/overlays/primary` or `sovereign-ai/overlays/standby`. Create `secure-intake-secrets` in each project's
-namespace. The manifests set no namespace, so they work in either setup.
+If this repo is private, give NKP (or the `secretRef` in `flux/*.yaml`) a read-only token.
 
 ## 3. Check
 
 ```sh
-kubectl -n sovereign-ai get kustomization,gitrepository     # READY=True
-kubectl -n sovereign-ai get pods,hpa,ingress
+kubectl -n $NS get pods,hpa,ingress
+kubectl -n $NS get configmap secure-intake-cluster -o yaml   # different on each cluster
 kubectl -n kommander-default-workspace get svc kommander-traefik   # EXTERNAL-IP = the demo IP (namespace may differ)
 ```
 
