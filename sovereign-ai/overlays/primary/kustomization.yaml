@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+configMapGenerator:
+  - name: secure-intake-config
+    behavior: merge
+    literals:
+      - CLUSTER_NAME=nkp-primary # TODO: real cluster name
+      - CLUSTER_DISPLAY_NAME=Primary cluster
+      - CLUSTER_ROLE=primary # blue banner; seeds sample records into an empty bucket

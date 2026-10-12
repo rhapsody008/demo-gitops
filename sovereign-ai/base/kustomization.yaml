@@ -1,0 +1,41 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: secure-intake
+      app.kubernetes.io/part-of: sovereign-ai-demo
+    includeSelectors: false
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml
+  - ingress.yaml
+
+images:
+  - name: ghcr.io/rhapsody008/sovereign-ai-demo
+    newTag: latest # pin to a sha-<short> tag before the event
+
+# Settings shared by both clusters. Per-cluster values are merged in by the overlays.
+configMapGenerator:
+  - name: secure-intake-config
+    literals:
+      - BASE_PATH=/piishield
+      # Nutanix Objects. Both clusters MUST point at the same bucket.
+      - S3_ENDPOINT=objects.example.local # TODO: Objects store host[:port]
+      - S3_BUCKET=secure-intake
+      - S3_USE_TLS=true
+      - S3_INSECURE_SKIP_VERIFY=true # lab Objects certs are usually self-signed
+      - S3_REGION=us-east-1
+      # NAI is configured from the UI and saved in the bucket. These are only a fallback.
+      - NAI_BASE_URL=
+      - NAI_MODEL=
+      - NAI_TIMEOUT=60s
+      - NAI_INSECURE_SKIP_VERIFY=true
+      - MAX_UPLOAD_MB=8
+      - SEED_SAMPLE_RECORDS=true
+      # Values shown on the NKP cluster tile (demo only; no Kubernetes API calls).
+      - DEMO_NODES=3
+      - DEMO_PODS=2
+      - DEMO_HPA_MAX=6

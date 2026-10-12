@@ -1,0 +1,23 @@
+# Exposed through NKP's built-in Traefik on HTTPS (the browser camera needs a
+# secure context). No host rule, so https://<traefik-LB-IP>/piishield/ works,
+# which is what the presenter types for the primary and then the standby.
+# The path prefix is passed through unchanged; the app expects it (BASE_PATH).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: secure-intake
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: kommander-traefik
+  rules:
+    - http:
+        paths:
+          - path: /piishield
+            pathType: Prefix
+            backend:
+              service:
+                name: secure-intake
+                port:
+                  name: http

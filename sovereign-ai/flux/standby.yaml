@@ -1,0 +1,39 @@
+# Apply once on the STANDBY cluster:  kubectl apply -f sovereign-ai/flux/standby.yaml
+# NKP's Flux then keeps sovereign-ai/overlays/standby in sync with this repo.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sovereign-ai
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: demo-gitops
+  namespace: sovereign-ai
+spec:
+  interval: 1m
+  url: https://github.com/rhapsody008/demo-gitops
+  ref:
+    branch: main
+  # Private repo: create a token secret and uncomment.
+  #   kubectl -n sovereign-ai create secret generic demo-gitops-auth \
+  #     --from-literal=username=git --from-literal=password=<github PAT, read-only>
+  # secretRef:
+  #   name: demo-gitops-auth
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: sovereign-ai
+  namespace: sovereign-ai
+spec:
+  interval: 5m
+  retryInterval: 1m
+  timeout: 3m
+  sourceRef:
+    kind: GitRepository
+    name: demo-gitops
+  path: ./sovereign-ai/overlays/standby
+  targetNamespace: sovereign-ai
+  prune: true
+  wait: true
