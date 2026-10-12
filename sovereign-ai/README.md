@@ -1,112 +1,136 @@
 # sovereign-ai: Secure Intake (PII Shield)
 
-Flux manifests for the [sovereign-ai-demo](https://github.com/rhapsody008/sovereign-ai-demo) app on two NKP clusters.
-The two clusters are a primary and a standby. Both store records in the same Nutanix Objects bucket and use the same
-NAI endpoint, so the standby shows the same records after the primary goes down.
+These are the Kubernetes manifests for the [sovereign-ai-demo](https://github.com/rhapsody008/sovereign-ai-demo) app.
+A single NKP project deploys them to two clusters, a primary and a standby. Both clusters use the same Nutanix Objects
+bucket and the same NAI endpoint, so the standby shows the same records after the primary goes down.
 
 ```
 sovereign-ai/
-├── base/                 Deployment, Service, HPA, Ingress, shared ConfigMap
-├── overlays/
-│   ├── primary/          CLUSTER_NAME / DISPLAY_NAME / ROLE=primary  (blue banner)
-│   └── standby/          CLUSTER_NAME / DISPLAY_NAME / ROLE=standby  (orange banner)
-├── cluster-config.example.yaml   per-cluster identity ConfigMap (NKP project setup; not applied by Flux)
-├── flux/
-│   ├── primary.yaml      Namespace + GitRepository + Kustomization → overlays/primary
-│   └── standby.yaml      Namespace + GitRepository + Kustomization → overlays/standby
-└── secret.example.yaml   Objects credentials template (not applied by Flux)
+├── kustomization.yaml            entry point: resources, image tag, shared settings (ConfigMap)
+├── deployment.yaml               app pods: probes, Downward API, hardened security context
+├── service.yaml                  ClusterIP :80 → :8080
+├── hpa.yaml                      2–6 pods at 70% CPU
+├── ingress.yaml                  NKP Traefik, HTTPS, path /piishield
+├── secret.example.yaml           Objects credentials: create by hand, same on both clusters
+└── cluster-config.example.yaml   cluster identity: create by hand, different on each cluster
 ```
 
-## 1. Before the first sync
+Flux applies only the files listed in `kustomization.yaml`. The two `*.example.yaml` files are templates. They are
+never applied from git.
 
-Edit these values and commit them:
+## How the two clusters differ
 
-| File | Value |
+NKP deploys identical manifests to both clusters. On each cluster, the pod also loads a ConfigMap named
+`secure-intake-cluster`, which you create by hand on that cluster. It sets `CLUSTER_NAME`, `CLUSTER_DISPLAY_NAME`
+and `CLUSTER_ROLE`:
+
+| | Primary | Standby |
+|---|---|---|
+| `CLUSTER_ROLE` | `primary`: blue banner. Writes 3 sample records if the bucket is empty | `standby`: orange banner |
+
+Everything else is shared through git (`kustomization.yaml`) or through the bucket (NAI settings, records, photos).
+
+## Setup
+
+### 1. Edit the shared settings in `kustomization.yaml`
+
+| Setting | Value |
 |---|---|
-| `base/kustomization.yaml` | `S3_ENDPOINT`: the Objects store host. Both clusters use the same value |
-| `base/kustomization.yaml` | `images.newTag`: pin it to a `sha-<short>` tag from GHCR before the event (it is `latest` now) |
-| `overlays/*/kustomization.yaml` | `CLUSTER_NAME` / `CLUSTER_DISPLAY_NAME`: the names shown in the banner |
+| `S3_ENDPOINT` | Objects store host (currently `10.8.18.10`) |
+| `S3_BUCKET` | `secure-intake`: the bucket already created in Objects |
+| `images.newTag` | Currently `latest`. Pin it to a `sha-<short>` tag from GHCR before the event |
 
-## 2. Deploy
+### 2. On each cluster, create the Secret and the identity ConfigMap
 
-### Option A — NKP project (recommended): one project, both clusters
-
-1. Create an NKP project and place it on **both** clusters. Note the project namespace.
-2. On **each** cluster, create the Objects Secret and that cluster's identity ConfigMap in the project namespace.
-   The Secret is the same on both clusters. The ConfigMap is not:
-
-   ```sh
-   NS=<project-namespace>
-   kubectl -n $NS create secret generic secure-intake-secrets \
-     --from-literal=S3_ACCESS_KEY=<objects access key> \
-     --from-literal=S3_SECRET_KEY=<objects secret key>
-
-   # primary cluster
-   kubectl -n $NS create configmap secure-intake-cluster \
-     --from-literal=CLUSTER_NAME=workload-demo-primary \
-     --from-literal=CLUSTER_DISPLAY_NAME="Workload Demo Primary Cluster" \
-     --from-literal=CLUSTER_ROLE=primary
-
-   # standby cluster
-   kubectl -n $NS create configmap secure-intake-cluster \
-     --from-literal=CLUSTER_NAME=workload-demo-standby \
-     --from-literal=CLUSTER_DISPLAY_NAME="Workload Demo Standby Cluster" \
-     --from-literal=CLUSTER_ROLE=standby
-   ```
-
-3. In the project, go to **Continuous Deployment** and add this repo as a GitOps source with path **`sovereign-ai/base`**.
-
-NKP deploys the same manifests to both clusters. Each pod reads `secure-intake-cluster` from its own cluster
-(see [cluster-config.example.yaml](cluster-config.example.yaml)), so the banner shows the right name and colour.
-If you create or change the ConfigMap after the pods have started, run
-`kubectl -n $NS rollout restart deployment/secure-intake`.
-
-### Option B — per-cluster Flux files (no NKP project)
-
-On each cluster: create the `sovereign-ai` namespace and the Secret (as above, `NS=sovereign-ai`), then run
-`kubectl apply -f sovereign-ai/flux/primary.yaml` or `flux/standby.yaml`. These point at `overlays/primary` and
-`overlays/standby`, which already contain the cluster names, so no identity ConfigMap is needed. If you create one
-anyway, it overrides the overlay values.
-
-### Image pull
-
-The app's GHCR image is private by default. Make the package public, or create a pull secret on both clusters and
-uncomment `imagePullSecrets` in `base/deployment.yaml`:
+Create them in the NKP project namespace, **before** the first sync. Pods only read them at start-up.
 
 ```sh
-kubectl -n $NS create secret docker-registry ghcr-pull \
-  --docker-server=ghcr.io --docker-username=<github user> --docker-password=<PAT with read:packages>
+NS=sovereign-ai   # the NKP project namespace
+
+# Same on both clusters. The key needs read/write access to the secure-intake bucket.
+kubectl -n $NS create secret generic secure-intake-secrets \
+  --from-literal=S3_ACCESS_KEY=<objects access key> \
+  --from-literal=S3_SECRET_KEY=<objects secret key>
+
+# Primary cluster only
+kubectl -n $NS create configmap secure-intake-cluster \
+  --from-literal=CLUSTER_NAME=workload-demo-primary \
+  --from-literal=CLUSTER_DISPLAY_NAME="Workload Demo Primary Cluster" \
+  --from-literal=CLUSTER_ROLE=primary
+
+# Standby cluster only
+kubectl -n $NS create configmap secure-intake-cluster \
+  --from-literal=CLUSTER_NAME=workload-demo-standby \
+  --from-literal=CLUSTER_DISPLAY_NAME="Workload Demo Standby Cluster" \
+  --from-literal=CLUSTER_ROLE=standby
 ```
 
-If this repo is private, give NKP (or the `secretRef` in `flux/*.yaml`) a read-only token.
+`NAI_API_KEY` and `ADMIN_TOKEN` are optional keys you can add to the Secret (see
+[secret.example.yaml](secret.example.yaml)). You normally don't need them, because the NAI endpoint and key are set
+in the UI.
 
-## 3. Check
+### 3. Add the GitOps source to the NKP project
+
+Place the project on **both** clusters. Under **Continuous Deployment**, add this repo with path **`sovereign-ai`**.
+
+### 4. Image pull (if the GHCR package is private)
+
+Make the package public, or do both of these:
+
+- create a pull secret on both clusters:
+
+  ```sh
+  kubectl -n $NS create secret docker-registry ghcr-pull \
+    --docker-server=ghcr.io --docker-username=<github user> --docker-password=<PAT with read:packages>
+  ```
+
+- uncomment `imagePullSecrets` in `deployment.yaml`
+
+## Check
+
+On each cluster:
 
 ```sh
 kubectl -n $NS get pods,hpa,ingress
 kubectl -n $NS get configmap secure-intake-cluster -o yaml   # different on each cluster
-kubectl -n kommander-default-workspace get svc kommander-traefik   # EXTERNAL-IP = the demo IP (namespace may differ)
+kubectl get svc -A | grep traefik                            # EXTERNAL-IP is the demo IP
 ```
 
 Open `https://<traefik-external-ip>/piishield/`. Accept the self-signed certificate once, before going on stage.
 The camera only works over HTTPS. The root path `/` returns 404 by design.
 
+All three tiles should be green:
+- **NAI endpoint**: Connected.
+- **Storage on Nutanix Cloud Infrastructure**: Reachable, with a record count.
+- **NKP cluster**: Healthy.
+
+NAI is set once in the UI under *NAI endpoint settings*. The settings are saved in the bucket at `config/nai.json`,
+so the other cluster picks them up automatically.
+
 ## Failover demo
 
-1. Open `https://<primary-ip>/piishield/` (blue banner). File a record.
+1. Open `https://<primary-ip>/piishield/` (blue banner). File a record, using text and/or a photo.
 2. Shut down the primary.
-3. Open `https://<standby-ip>/piishield/` (orange banner). The same records are there, the NAI settings are already
-   loaded from the bucket, and new records are tagged with the standby cluster.
+3. Open `https://<standby-ip>/piishield/` (orange banner). The same records are there, and NAI is already configured.
+   New records are tagged with the standby cluster's name.
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| Both clusters show "local" or a blue banner | `secure-intake-cluster` is missing or was created after the pods started. Create it, then run `kubectl -n $NS rollout restart deployment/secure-intake` |
+| Pods in `CreateContainerConfigError` | `secure-intake-secrets` doesn't exist in the project namespace |
+| Pods not Ready, Storage tile says "Unreachable" | `/readyz` fails when the bucket can't be reached. Check `S3_ENDPOINT`, the keys, and the key's access to `secure-intake` |
+| `ImagePullBackOff` | The GHCR package is private. See step 4 |
+| "Camera needs HTTPS" message | The page was opened over `http://`. Use `https://…/piishield/` |
+| 404 at `https://<ip>/` | Expected. The app is only served under `/piishield/` |
 
 ## Notes
 
-- **NAI endpoint:** set it in the UI under *NAI endpoint settings*. It is saved in the bucket at `config/nai.json`,
-  so you only set it once, for both clusters. `NAI_BASE_URL` in the ConfigMap is just a fallback.
 - **Ingress:** it uses NKP's Traefik (`kommander-traefik`) on the `websecure` entrypoint, with no host rule, and
-  passes the `/piishield` prefix through unchanged. The app expects the prefix (`BASE_PATH`).
-- **Kubernetes API:** the app makes no Kubernetes API calls, so it needs no RBAC. The *NKP cluster* tile shows
-  `DEMO_NODES` / `DEMO_PODS` / `DEMO_HPA_MAX` from the ConfigMap.
-- **Replicas:** the Deployment has no `replicas` field. The HPA (2–6 pods at 70% CPU) owns the count, so Flux
-  does not reset it.
-- **Sample records:** only the primary seeds the 3 sample records, and only when the bucket is empty. To turn this
-  off, set `SEED_SAMPLE_RECORDS=false`.
+  passes the `/piishield` prefix through to the app unchanged (`BASE_PATH`).
+- **Replicas:** the Deployment has no `replicas` field. The HPA owns the replica count, so Flux does not reset it.
+- **NKP cluster tile:** the numbers come from `DEMO_NODES` / `DEMO_PODS` / `DEMO_HPA_MAX` in `kustomization.yaml`.
+  The app makes no Kubernetes API calls and needs no RBAC.
+- **Sample records:** to stop the primary seeding them, set `SEED_SAMPLE_RECORDS=false`.
+- **COSI:** not used. The app connects to the existing bucket with the static key in `secure-intake-secrets`.

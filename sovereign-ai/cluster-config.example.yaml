@@ -19,7 +19,8 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: secure-intake-cluster
+  name: secure-intake-config
+  namespace: sovereign-ai
 data:
   CLUSTER_NAME: workload-demo-primary
   CLUSTER_DISPLAY_NAME: Workload Demo Primary Cluster

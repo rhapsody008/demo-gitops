@@ -46,13 +46,13 @@ spec:
             - configMapRef:
                 name: secure-intake-config
             # S3_ACCESS_KEY, S3_SECRET_KEY (required); NAI_API_KEY, ADMIN_TOKEN (optional).
-            # Created out of band — see ../secret.example.yaml.
+            # Created out of band — see secret.example.yaml.
             - secretRef:
                 name: secure-intake-secrets
             # Per-cluster identity (CLUSTER_NAME, CLUSTER_DISPLAY_NAME, CLUSTER_ROLE),
             # created by hand on each cluster so one NKP project can deploy identical
             # manifests everywhere. Listed last so it overrides the values above.
-            # See ../cluster-config.example.yaml.
+            # See cluster-config.example.yaml.
             - configMapRef:
                 name: secure-intake-cluster
                 optional: true

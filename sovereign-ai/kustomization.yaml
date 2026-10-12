@@ -17,7 +17,8 @@ images:
   - name: ghcr.io/rhapsody008/sovereign-ai-demo
     newTag: latest # pin to a sha-<short> tag before the event
 
-# Settings shared by both clusters. Per-cluster values are merged in by the overlays.
+# Settings shared by both clusters. Per-cluster identity comes from the
+# secure-intake-cluster ConfigMap created on each cluster (cluster-config.example.yaml).
 configMapGenerator:
   - name: secure-intake-config
     literals:
