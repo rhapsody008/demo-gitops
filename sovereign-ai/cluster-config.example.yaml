@@ -22,6 +22,6 @@ metadata:
   name: secure-intake-config
   namespace: sovereign-ai
 data:
-  CLUSTER_NAME: workload-demo-primary
-  CLUSTER_DISPLAY_NAME: Workload Demo Primary Cluster
-  CLUSTER_ROLE: primary # primary = blue banner + seeds samples; standby = orange banner
+  CLUSTER_NAME: workload-demo-secondary
+  CLUSTER_DISPLAY_NAME: Workload Demo Secondary Cluster
+  CLUSTER_ROLE: secondary # primary = blue banner + seeds samples; standby = orange banner
