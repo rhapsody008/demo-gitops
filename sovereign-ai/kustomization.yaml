@@ -38,5 +38,5 @@ configMapGenerator:
       - SEED_SAMPLE_RECORDS=true
       # Values shown on the NKP cluster tile (demo only; no Kubernetes API calls).
       - DEMO_NODES=3
-      - DEMO_PODS=2
+      - DEMO_PODS=1
       - DEMO_HPA_MAX=6

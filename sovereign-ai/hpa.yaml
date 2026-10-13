@@ -7,7 +7,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: secure-intake
-  minReplicas: 2
+  minReplicas: 1 # single pod so deleting it shows Kubernetes self-healing
   maxReplicas: 6
   metrics:
     - type: Resource

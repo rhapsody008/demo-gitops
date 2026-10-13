@@ -3,7 +3,8 @@ kind: Deployment
 metadata:
   name: secure-intake
 spec:
-  # No replicas field: the HPA owns the replica count, so Flux won't reset it.
+  # No replicas field: it defaults to 1 and the HPA (min 1) owns the count, so
+  # Flux never fights the HPA by resetting it.
   revisionHistoryLimit: 3
   selector:
     matchLabels:

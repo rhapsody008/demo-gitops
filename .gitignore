@@ -1,0 +1,3 @@
+# kubeconfigs (cluster credentials)
+*.conf
+*kubeconfig*

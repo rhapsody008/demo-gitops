@@ -9,7 +9,7 @@ sovereign-ai/
 ├── kustomization.yaml            entry point: resources, image tag, shared settings (ConfigMap)
 ├── deployment.yaml               app pods: probes, Downward API, hardened security context
 ├── service.yaml                  ClusterIP :80 → :8080
-├── hpa.yaml                      2–6 pods at 70% CPU
+├── hpa.yaml                      1–6 pods at 70% CPU (one pod, for the self-healing demo)
 ├── ingress.yaml                  NKP Traefik, HTTPS, path /piishield
 ├── secret.example.yaml           Objects credentials: create by hand, same on both clusters
 └── cluster-config.example.yaml   cluster identity: create by hand, different on each cluster
@@ -114,6 +114,19 @@ so the other cluster picks them up automatically.
 3. Open `https://<standby-ip>/piishield/` (orange banner). The same records are there, and NAI is already configured.
    New records are tagged with the standby cluster's name.
 
+## Self-healing demo
+
+The app runs as a single pod, so deleting it shows Kubernetes replacing it:
+
+```sh
+kubectl -n $NS get pods -w &                     # watch in a second terminal
+kubectl -n $NS delete pod -l app=secure-intake
+```
+
+1. The banner turns red ("Connection lost") for a few seconds, while no pod is Ready.
+2. Kubernetes starts a new pod, and the banner comes back with a **new pod name**.
+3. The records are all still there, because they live in Objects, not in the pod.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
@@ -129,7 +142,7 @@ so the other cluster picks them up automatically.
 
 - **Ingress:** it uses NKP's Traefik (`kommander-traefik`) on the `websecure` entrypoint, with no host rule, and
   passes the `/piishield` prefix through to the app unchanged (`BASE_PATH`).
-- **Replicas:** the Deployment has no `replicas` field. The HPA owns the replica count, so Flux does not reset it.
+- **Replicas:** the Deployment has no `replicas` field, so it starts at 1. The HPA (min 1, max 6) owns the replica count, so Flux does not reset it.
 - **NKP cluster tile:** the numbers come from `DEMO_NODES` / `DEMO_PODS` / `DEMO_HPA_MAX` in `kustomization.yaml`.
   The app makes no Kubernetes API calls and needs no RBAC.
 - **Sample records:** to stop the primary seeding them, set `SEED_SAMPLE_RECORDS=false`.
