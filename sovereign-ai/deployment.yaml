@@ -70,18 +70,23 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+          # Tight probes for the self-healing demo: a new pod gets traffic about
+          # 1s after it is up, and a hung pod is restarted within ~6s.
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
-            periodSeconds: 5
-            failureThreshold: 3
+            periodSeconds: 1
+            timeoutSeconds: 1
+            failureThreshold: 2
           livenessProbe:
             httpGet:
               path: /healthz
               port: http
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            timeoutSeconds: 1
+            failureThreshold: 3
           resources:
             requests:
               cpu: 100m
