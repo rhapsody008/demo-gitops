@@ -24,7 +24,7 @@ configMapGenerator:
     literals:
       - BASE_PATH=/piishield
       # Nutanix Objects. Both clusters MUST point at the same bucket.
-      - S3_ENDPOINT=10.8.18.10 # TODO: Objects store host[:port]
+      - S3_ENDPOINT=171.16.0.13 # TODO: Objects store host[:port]
       - S3_BUCKET=secure-intake
       - S3_USE_TLS=true
       - S3_INSECURE_SKIP_VERIFY=true # lab Objects certs are usually self-signed
