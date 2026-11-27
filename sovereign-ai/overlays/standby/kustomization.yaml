@@ -8,7 +8,7 @@ resources:
 
 replicas:
   - name: secure-intake
-    count: 0
+    count: 3
 
 configMapGenerator:
   # Cluster identity. A change rolls the pods (hashed name).
