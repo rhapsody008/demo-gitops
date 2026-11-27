@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Standby cluster. NKP project path: sovereign-ai/overlays/standby
+# Runs no pods until failover: set count to 2 (or kubectl scale) to bring it up.
+resources:
+  - ../../base
+
+replicas:
+  - name: secure-intake
+    count: 0
+
+configMapGenerator:
+  # Cluster identity. A change rolls the pods (hashed name).
+  - name: secure-intake-cluster
+    literals:
+      - CLUSTER_NAME=workload-standby
+      - CLUSTER_DISPLAY_NAME=Workload Demo Standby Cluster
+      - CLUSTER_ROLE=standby # orange banner

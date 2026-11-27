@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Primary cluster. NKP project path: sovereign-ai/overlays/primary
+resources:
+  - ../../base
+
+replicas:
+  - name: secure-intake
+    count: 2
+
+configMapGenerator:
+  # Cluster identity. A change rolls the pods (hashed name).
+  - name: secure-intake-cluster
+    literals:
+      - CLUSTER_NAME=workload-primary
+      - CLUSTER_DISPLAY_NAME=Workload Demo Primary Cluster
+      - CLUSTER_ROLE=primary # blue banner; seeds sample records if the bucket is empty

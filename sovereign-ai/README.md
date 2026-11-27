@@ -1,77 +1,77 @@
 # sovereign-ai: Secure Intake (PII Shield)
 
 These are the Kubernetes manifests for the [sovereign-ai-demo](https://github.com/rhapsody008/sovereign-ai-demo) app.
-A single NKP project deploys them to two clusters, a primary and a standby. Both clusters use the same Nutanix Objects
+Two NKP projects deploy them: one to the primary cluster and one to the standby cluster. Both clusters use the same Nutanix Objects
 bucket and the same NAI endpoint, so the standby shows the same records after the primary goes down.
 
 ```
 sovereign-ai/
-├── kustomization.yaml            entry point: resources, image tag, shared settings (ConfigMap)
-├── deployment.yaml               app pods: probes, Downward API, hardened security context
-├── service.yaml                  ClusterIP :80 → :8080
-├── hpa.yaml                      1–6 pods at 70% CPU (one pod, for the self-healing demo)
-├── ingress.yaml                  NKP Traefik, HTTPS, path /piishield
-├── secret.example.yaml           Objects credentials: create by hand, same on both clusters
-└── cluster-config.example.yaml   cluster identity: create by hand, different on each cluster
+├── base/
+│   ├── kustomization.yaml        resources, image tag, shared settings (ConfigMap secure-intake-config)
+│   ├── rbac.yaml                 ServiceAccount + Role: list pods in its own namespace (live pod count)
+│   ├── deployment.yaml           app pods: probes, Downward API, hardened security context
+│   ├── service.yaml              ClusterIP :80 → :8080
+│   ├── hpa.yaml                  1–6 pods at 70% CPU (not applied, see Notes)
+│   ├── ingress.yaml              NKP Traefik, HTTPS, path /piishield
+│   └── secret.example.yaml       Objects credentials: create by hand, same on both clusters
+└── overlays/
+    ├── primary/kustomization.yaml   2 replicas, cluster identity "primary"
+    └── standby/kustomization.yaml   0 replicas, cluster identity "standby"
 ```
 
-Flux applies only the files listed in `kustomization.yaml`. The two `*.example.yaml` files are templates. They are
+Flux applies only the files listed in the `kustomization.yaml` files. `secret.example.yaml` is a template and is
 never applied from git.
 
 ## How the two clusters differ
 
-NKP deploys identical manifests to both clusters. On each cluster, the pod also loads a ConfigMap named
-`secure-intake-cluster`, which you create by hand on that cluster. It sets `CLUSTER_NAME`, `CLUSTER_DISPLAY_NAME`
-and `CLUSTER_ROLE`:
+Each overlay generates a ConfigMap named `secure-intake-cluster`, which sets `CLUSTER_NAME`, `CLUSTER_DISPLAY_NAME`
+and `CLUSTER_ROLE`, and sets the replica count:
 
-| | Primary | Standby |
+| | Primary (`overlays/primary`) | Standby (`overlays/standby`) |
 |---|---|---|
+| Replicas | 2 | 0: no pods until failover |
+| `CLUSTER_NAME` | `workload-primary` | `workload-standby` |
 | `CLUSTER_ROLE` | `primary`: blue banner. Writes 3 sample records if the bucket is empty | `standby`: orange banner |
 
-Everything else is shared through git (`kustomization.yaml`) or through the bucket (NAI settings, records, photos).
+Everything else is shared through `base/` or through the bucket (NAI settings, records, photos). The ConfigMap names
+are hashed, so editing the identity in git rolls the pods automatically.
 
 ## Setup
 
-### 1. Edit the shared settings in `kustomization.yaml`
+### 1. Edit the shared settings in `base/kustomization.yaml`
 
 | Setting | Value |
 |---|---|
-| `S3_ENDPOINT` | Objects store host (currently `10.8.18.10`) |
+| `S3_ENDPOINT` | Objects store host (currently `10.8.79.10`) |
 | `S3_BUCKET` | `secure-intake`: the bucket already created in Objects |
 | `images.newTag` | Currently `latest`. Pin it to a `sha-<short>` tag from GHCR before the event |
 
-### 2. On each cluster, create the Secret and the identity ConfigMap
+### 2. On each cluster, create the Secret
 
-Create them in the NKP project namespace, **before** the first sync. Pods only read them at start-up.
+Create it in the NKP project namespace, **before** the first sync. Pods only read it at start-up.
 
 ```sh
-NS=sovereign-ai   # the NKP project namespace
+NS="your-project-namespace"   # differs per NKP project
 
 # Same on both clusters. The key needs read/write access to the secure-intake bucket.
 kubectl -n $NS create secret generic secure-intake-secrets \
   --from-literal=S3_ACCESS_KEY=<objects access key> \
   --from-literal=S3_SECRET_KEY=<objects secret key>
-
-# Primary cluster only
-kubectl -n $NS create configmap secure-intake-cluster \
-  --from-literal=CLUSTER_NAME=workload-demo-primary \
-  --from-literal=CLUSTER_DISPLAY_NAME="Workload Demo Primary Cluster" \
-  --from-literal=CLUSTER_ROLE=primary
-
-# Standby cluster only
-kubectl -n $NS create configmap secure-intake-cluster \
-  --from-literal=CLUSTER_NAME=workload-demo-standby \
-  --from-literal=CLUSTER_DISPLAY_NAME="Workload Demo Standby Cluster" \
-  --from-literal=CLUSTER_ROLE=standby
 ```
 
 `NAI_API_KEY` and `ADMIN_TOKEN` are optional keys you can add to the Secret (see
-[secret.example.yaml](secret.example.yaml)). You normally don't need them, because the NAI endpoint and key are set
+[base/secret.example.yaml](base/secret.example.yaml)). You normally don't need them, because the NAI endpoint and key are set
 in the UI.
 
-### 3. Add the GitOps source to the NKP project
+### 3. Add the GitOps source to each NKP project
 
-Place the project on **both** clusters. Under **Continuous Deployment**, add this repo with path **`sovereign-ai`**.
+| NKP project | Placed on | Continuous Deployment path |
+|---|---|---|
+| primary project | primary cluster | `sovereign-ai/overlays/primary` |
+| standby project | standby cluster | `sovereign-ai/overlays/standby` |
+
+If an existing NKP project still points at the old path `sovereign-ai`, change it to one of the overlay paths. The
+old path no longer has a `kustomization.yaml`, so Flux would pick up both overlays and fail on duplicate resources.
 
 ### 4. Image pull (if the GHCR package is private)
 
@@ -84,15 +84,15 @@ Make the package public, or do both of these:
     --docker-server=ghcr.io --docker-username=<github user> --docker-password=<PAT with read:packages>
   ```
 
-- uncomment `imagePullSecrets` in `deployment.yaml`
+- uncomment `imagePullSecrets` in `base/deployment.yaml`
 
 ## Check
 
-On each cluster:
+On each cluster (the standby has no pods until it is scaled up):
 
 ```sh
-kubectl -n $NS get pods,hpa,ingress
-kubectl -n $NS get configmap secure-intake-cluster -o yaml   # different on each cluster
+kubectl -n $NS get deploy,pods,ingress
+kubectl -n $NS get configmap | grep secure-intake-cluster           # secure-intake-cluster-<hash>, differs per cluster
 kubectl get svc -A | grep traefik                            # EXTERNAL-IP is the demo IP
 ```
 
@@ -111,27 +111,33 @@ so the other cluster picks them up automatically.
 
 1. Open `https://<primary-ip>/piishield/` (blue banner). File a record, using text and/or a photo.
 2. Shut down the primary.
-3. Open `https://<standby-ip>/piishield/` (orange banner). The same records are there, and NAI is already configured.
+3. Scale up the standby: set `count: 2` in `overlays/standby/kustomization.yaml` and push (Flux applies it), or for a
+   quick demo run `kubectl -n $NS scale deployment/secure-intake --replicas=2` (Flux resets it to 0 on its next sync).
+4. Open `https://<standby-ip>/piishield/` (orange banner). The same records are there, and NAI is already configured.
    New records are tagged with the standby cluster's name.
 
 ## Self-healing demo
 
-The app runs as a single pod, so deleting it shows Kubernetes replacing it:
+On the primary (2 pods), deleting a pod shows Kubernetes replacing it while the other pod keeps serving:
 
 ```sh
 kubectl -n $NS get pods -w &                     # watch in a second terminal
-kubectl -n $NS delete pod -l app=secure-intake
+kubectl -n $NS get pods -l app=secure-intake     # pick one pod name
+kubectl -n $NS delete pod <pod-name>
 ```
 
-1. The banner turns red ("Connection lost") for a few seconds, while no pod is Ready.
-2. Kubernetes starts a new pod, and the banner comes back with a **new pod name**.
+1. Kubernetes starts a replacement pod within seconds. Delete both pods to see the banner turn red
+   ("Connection lost") until a pod is Ready again.
+2. Refresh the page to see the banner show a **new pod name**.
 3. The records are all still there, because they live in Objects, not in the pod.
 
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
-| Both clusters show "local" or a blue banner | `secure-intake-cluster` is missing or was created after the pods started. Create it, then run `kubectl -n $NS rollout restart deployment/secure-intake` |
+| Standby shows no pods | Expected: the standby overlay sets 0 replicas. Scale it up (see Failover demo) |
+| Both clusters show a blue banner | The standby project points at `overlays/primary`. Set the path to `sovereign-ai/overlays/standby` |
+| Cluster tile says "Status unavailable" with a 403 | The `secure-intake` ServiceAccount, Role or RoleBinding is missing. Check `kubectl -n $NS get sa,role,rolebinding` and `kubectl -n $NS auth can-i list pods --as=system:serviceaccount:$NS:secure-intake` |
 | Pods in `CreateContainerConfigError` | `secure-intake-secrets` doesn't exist in the project namespace |
 | Pods not Ready, Storage tile says "Unreachable" | `/readyz` fails when the bucket can't be reached. Check `S3_ENDPOINT`, the keys, and the key's access to `secure-intake` |
 | `ImagePullBackOff` | The GHCR package is private. See step 4 |
@@ -142,8 +148,13 @@ kubectl -n $NS delete pod -l app=secure-intake
 
 - **Ingress:** it uses NKP's Traefik (`kommander-traefik`) on the `websecure` entrypoint, with no host rule, and
   passes the `/piishield` prefix through to the app unchanged (`BASE_PATH`).
-- **Replicas:** the Deployment has no `replicas` field, so it starts at 1. The HPA (min 1, max 6) owns the replica count, so Flux does not reset it.
-- **NKP cluster tile:** the numbers come from `DEMO_NODES` / `DEMO_PODS` / `DEMO_HPA_MAX` in `kustomization.yaml`.
-  The app makes no Kubernetes API calls and needs no RBAC.
-- **Sample records:** to stop the primary seeding them, set `SEED_SAMPLE_RECORDS=false`.
+- **Replicas:** the base Deployment has no `replicas` field; each overlay sets it (primary 2, standby 0) and Flux
+  enforces it. `base/hpa.yaml` is not applied, because an HPA and a git-pinned replica count would fight over the primary's count.
+  If you enable it, remove the `replicas` field from the primary overlay. An HPA does nothing while its target is at
+  0 replicas, so it won't wake the standby.
+- **NKP cluster tile:** the app pod count is live. The app lists the Ready `app=secure-intake` pods in its own
+  namespace, using the `secure-intake` ServiceAccount and a namespaced Role that only allows `list pods`
+  (`base/rbac.yaml`). The node count and HPA max are still fixed values (`DEMO_NODES` / `DEMO_HPA_MAX` in
+  `base/kustomization.yaml`). No ClusterRole is needed.
+- **Sample records:** to stop the primary seeding them, set `SEED_SAMPLE_RECORDS=false` in `base/kustomization.yaml`.
 - **COSI:** not used. The app connects to the existing bucket with the static key in `secure-intake-secrets`.

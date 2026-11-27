@@ -8,17 +8,18 @@ labels:
     includeSelectors: false
 
 resources:
+  - rbac.yaml
   - deployment.yaml
   - service.yaml
-  # - hpa.yaml
+  # - hpa.yaml   # off: the overlays pin replicas (standby 0), which an HPA (min 1) would override
   - ingress.yaml
 
 images:
   - name: ghcr.io/rhapsody008/sovereign-ai-demo
     newTag: latest # pin to a sha-<short> tag before the event
 
-# Settings shared by both clusters. Per-cluster identity comes from the
-# secure-intake-cluster ConfigMap created on each cluster (cluster-config.example.yaml).
+# Settings shared by both clusters. Per-cluster identity (secure-intake-cluster)
+# and per-cluster overrides live in overlays/primary and overlays/standby.
 configMapGenerator:
   - name: secure-intake-config
     literals:
@@ -36,7 +37,6 @@ configMapGenerator:
       - NAI_INSECURE_SKIP_VERIFY=true
       - MAX_UPLOAD_MB=8
       - SEED_SAMPLE_RECORDS=true
-      # Values shown on the NKP cluster tile (demo only; no Kubernetes API calls).
+      # Fixed values on the NKP cluster tile. The pod count is read live.
       - DEMO_NODES=3
-      - DEMO_PODS=1
       - DEMO_HPA_MAX=6
